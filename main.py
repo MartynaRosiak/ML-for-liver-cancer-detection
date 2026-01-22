@@ -20,7 +20,7 @@ df = pd.read_csv("C:/Users/MICRON PRO/Desktop/synthetic_liver_cancer_dataset.csv
 print(df)
 
 
-df.info()  # sprawdzenie struktury danych
+df.info()  
 print(df.isnull().sum())  # wyświetla ilosc brakującytch wartości
 print(df.duplicated().sum())  # wyświetla ilość zdublikowanych danych
 pd.set_option('display.max_rows', None)
