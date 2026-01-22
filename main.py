@@ -3,34 +3,35 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import warnings
-
-from sklearn.preprocessing import RobustScaler
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import RobustScaler, LabelEncoder
+from sklearn.impute import SimpleImputer
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
-from sklearn.metrics import precision_recall_curve
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    ConfusionMatrixDisplay,
+    roc_curve,
+    auc,
+    precision_recall_curve
+)
 from sklearn.linear_model import LogisticRegression
 from imblearn.over_sampling import SMOTE
-from sklearn.impute import SimpleImputer
+import tensorflow as tf
+from tensorflow.keras import layers, models
+import random
+import os
 
-# ============================
-# Wczytanie danych
-# ============================
 df = pd.read_csv("C:/Users/MICRON PRO/Desktop/synthetic_liver_cancer_dataset.csv")
 print(df)
 
-
 df.info()  
-print(df.isnull().sum())  # wyświetla ilosc brakującytch wartości
-print(df.duplicated().sum())  # wyświetla ilość zdublikowanych danych
+print(df.isnull().sum())
+print(df.duplicated().sum())
 pd.set_option('display.max_rows', None)
 pd.set_option('display.max_columns', None)
 pd.set_option('display.width', None)
-print(df.describe().T) # generuje podstawowe statystyki opisowe dla kolumn numerycznych
+print(df.describe().T)
 
-# ============================
-# Funkcja do wartości odstających
-# ============================
 def define_outliers(df):
     outliers = pd.DataFrame()
     numeric_cols = df.select_dtypes(include=['int64', 'float64']).columns
@@ -48,15 +49,12 @@ def define_outliers(df):
 
 outliers = define_outliers(df)
 
-print(df.columns)   # nazwy kolumn
-print(df.nunique()) # liczba unikalnych wartości w kolumnach
+print(df.columns)
+print(df.nunique())
 
-# ============================
-# WYKRESY BOXPLOT - WARTOŚCI ODSTAJĄCE
-# ============================
+# Wykresy wartości odstających
 continuous_features = ['age', 'bmi', 'liver_function_score', 'alpha_fetoprotein_level']
 
-# Tytuły do wykresów po polsku
 tit = {
     'age': 'Rozkład wieku pacjentów',
     'bmi': 'Rozkład wskaźnika masy ciała (BMI)',
@@ -79,17 +77,14 @@ for i, feature in enumerate(continuous_features):
     plt.title(tit[feature], fontsize=12)
     plt.ylabel(y_labels[feature], fontsize=10)
 
-plt.subplots_adjust(top=0.9)  # zostawia miejsce na tytuł główny
+plt.subplots_adjust(top=0.9)
 plt.suptitle('Wartości odstające dla zmiennych ciągłych', fontsize=16)
 plt.show()
 
-# ============================
-# Rozkład etykiet
-# ============================
+# Rozkład pacjentów chorych i zdrowych
 counts = df['liver_cancer'].value_counts()
 print(counts)
 
-# Zamiana 0/1 na polskie etykiety tylko do wkresu
 counts_plot = counts.rename(index={0: 'Brak raka', 1: 'Rak wątroby'})
 
 counts_plot.plot(kind='bar', color='tan')
@@ -100,9 +95,7 @@ plt.xticks(rotation=45)
 plt.tight_layout()
 plt.show()
 
-# ============================
 # Rozkład płci vs wystąpienie raka
-# ============================
 gender_counts = df.groupby(["liver_cancer", "gender"]).size().unstack()
 
 gender_counts = gender_counts.rename(columns={'Female': 'Kobiety', 'Male': 'Mężczyźni'})
@@ -117,18 +110,14 @@ plt.tight_layout()
 plt.legend()
 plt.show()
 
-# ============================
-# Identyfikacja kolumn kategorycznych i liczbowych
-# ============================
+# Identyfikacja kolumn kategorycznych i ciągłych
 cat_columns = df.select_dtypes(include=['object']).columns.tolist()
 num_columns = df.select_dtypes(include=[np.number]).columns.tolist()
 
-# Kolumny kategoryczne
+# Kolumny kategoryczne oprócz liver_cancer
 cat_columns_to_encode = [col for col in cat_columns if col != 'liver_cancer']
 
-# ============================
-# WYKRESY KOŁOWE DLA ZMIENNYCH KATEGORYCZNYCH
-# ============================
+# Wykresy kołowe dla zmiennych kategorycznych
 other_cat_columns = [
     'gender',
     'alcohol_consumption',
@@ -156,7 +145,6 @@ translations = {
     'Moderate': 'Umiarkowane',
     'High': 'Wysokie'
 }
-
 
 df_display = df.copy()
 for col in other_cat_columns:
@@ -194,7 +182,6 @@ def plot_pie_group(columns, fig_title):
         )
         axes[i].set_title(titles1.get(column, column), fontsize=12)
 
-    # Ukrycie pustych osi
     for j in range(len(columns), len(axes)):
         axes[j].axis('off')
 
@@ -204,9 +191,7 @@ def plot_pie_group(columns, fig_title):
 
 plot_pie_group(other_cat_columns, "Wykresy kołowe dla zmiennych kategorycznych")
 
-# ============================
-# HISTOGRAMY DLA ZMIENNYCH CIĄGŁYCH
-# ============================
+# Historgramy dla zmiennych ciągłych
 warnings.filterwarnings("ignore", message="use_inf_as_na option is deprecated", category=FutureWarning)
 
 num_columns = ['age', 'bmi', 'liver_function_score', 'alpha_fetoprotein_level']
@@ -255,10 +240,7 @@ plt.suptitle('Histogramy dla zmiennych ciągłych', fontsize=16, fontweight='bol
 plt.tight_layout()
 plt.show()
 
-
-# ============================
-# ROZKŁADY ZMIENNYCH CIĄGŁYCH WZGLĘDEM LIVER_CANCER
-# ============================
+# Rozkłady zmiennych ciągłych względem liver_cancer
 continuous_features = [
     'age',
     'bmi',
@@ -305,13 +287,10 @@ for i, feature in enumerate(continuous_features):
 plt.tight_layout()
 plt.show()
 
-#=========================================
-
-# Zmienne binarne
+# Wykresy słupkowe obrazujące zależności między zmiennymi binarnymi a zmienną celu.
 binary = ["hepatitis_b", "hepatitis_c", "cirrhosis_history",
           "family_history_cancer", "diabetes"]
 
-# Tłumaczenia nazw zmiennych
 binary_labels = {
     "hepatitis_b": "Wirusowe zapalenie wątroby B",
     "hepatitis_c": "Wirusowe zapalenie wątroby C",
@@ -319,7 +298,7 @@ binary_labels = {
     "family_history_cancer": "Rak w rodzinie",
     "diabetes": "Cukrzyca"
 }
-# Krótkie, opisowe tytuły do wykresów
+
 plot_titles = {
     "hepatitis_b": "HBV a ryzyko raka wątroby",
     "hepatitis_c": "HCV a ryzyko raka wątroby",
@@ -345,13 +324,11 @@ for ax, col in zip(axes, binary):
     ax.set_xticks([0, 1])
     ax.set_xticklabels(["Nie", "Tak"])
 
-    # Legendę ustawiamy ręcznie, żeby była po polsku
     handles, labels = ax.get_legend_handles_labels()
     if handles:
         labels = ["Brak raka", "Rak wątroby"]  # polskie nazwy
         ax.legend(handles, labels, loc="upper right")
 
-# Usuwamy pustą oś, jeśli liczba subplotów > liczba zmiennych
 if len(binary) < len(axes):
     for i in range(len(binary), len(axes)):
         fig.delaxes(axes[i])
@@ -359,23 +336,16 @@ if len(binary) < len(axes):
 plt.tight_layout()
 plt.show()
 
-# ============================
-# Tworzymy df_encoded do modelowania
-# ============================
+# One Hot Encoding tylko dla zmiennych kategorycznych
 df_encoded = df.copy()
-
-# One Hot Encoding tylko dla kategorii
 df_encoded = pd.get_dummies(df_encoded, columns=cat_columns_to_encode, drop_first=True)
 
 # Skalowanie zmiennych ciągłych
 scaler = RobustScaler()
 df_encoded[continuous_features] = scaler.fit_transform(df_encoded[continuous_features])
-
 print(df_encoded.head())
 
-# ============================
-# MACIERZ KORELACJI
-# ============================
+# Macierz korelacji
 X_corr_base = df.drop(columns=['liver_cancer'])
 y_corr = df['liver_cancer']
 
@@ -450,29 +420,20 @@ ax.set_yticklabels(ax.get_yticklabels(), fontsize=11)
 
 plt.show()
 
-#============================
-# PODZIAŁ DANYCH — MODEL
-# ============================
 X = df_encoded.drop(['liver_cancer'], axis=1)
 y = df_encoded['liver_cancer']
-
-# Konwersja na liczby (powinno być już numeryczne, ale na wszelki wypadek)
 X = X.apply(pd.to_numeric, errors='coerce')
-
 print("Liczba NaN po konwersji:")
 print(X.isna().sum())
 
-# IMPUTACJA NaN
+# Imputacja medianą
 imputer = SimpleImputer(strategy="median")
 X = pd.DataFrame(imputer.fit_transform(X), columns=X.columns)
-
 print("Liczba NaN po imputacji:")
 print(X.isna().sum())
 print(np.isinf(X).sum())
 
-# DIAGNOSTYKA
-print("\n==== DIAGNOSTYKA =====")
-print("\nRozkład klas (liver_cancer):")
+print("\nRozkład klas liver_cancer:")
 print(y.value_counts())
 
 print("\nŚrednie wartości numeryczne dla klas liver_cancer:")
@@ -481,7 +442,7 @@ print(df.groupby('liver_cancer').mean(numeric_only=True))
 print("\nKorelacje cech z liver_cancer w df_encoded:")
 print(df_encoded.corr(numeric_only=True)['liver_cancer'].sort_values(ascending=False))
 
-# PODZIAŁ 80/20 Z STRATYFIKACJĄ
+# Podział 80/20 z zachowaniem proporcji klas
 X_train, X_test, y_train, y_test = train_test_split(
     X, y,
     test_size=0.2,
@@ -497,17 +458,14 @@ print(f"y_test  shape: {y_test.shape}")
 print("\nRozkład klas po podziale (y_test):")
 print(y_test.value_counts())
 
-
-# ============================
-# REGRESJA LOGISTYCZNA + SMOTE
-# ============================
-print("\nBALANS PRZED SMOTE:")
+# REGRESJA LOGISTYCZNA (+ SMOTE)
+print("\nBalans przed SMOTE:")
 print(y_train.value_counts())
 
 sm = SMOTE(random_state=42)
 X_train_res, y_train_res = sm.fit_resample(X_train, y_train)
 
-print("\nBALANS PO SMOTE:")
+print("\nBalans po SMOTE:")
 print(y_train_res.value_counts())
 
 logreg = LogisticRegression(
@@ -518,11 +476,10 @@ logreg = LogisticRegression(
 )
 logreg.fit(X_train_res, y_train_res)
 
-# Predykcje
 y_pred = logreg.predict(X_test)
 y_prob = logreg.predict_proba(X_test)[:, 1]
 
-# MACIERZ POMYŁEK
+# Macierz pomyłek
 plt.figure(figsize=(5, 4))
 sns.heatmap(confusion_matrix(y_test, y_pred),
             annot=True,
@@ -534,7 +491,7 @@ plt.ylabel("Klasa rzeczywista")
 plt.tight_layout()
 plt.show()
 
-# KRZYWA ROC
+# Krzywa ROC
 fpr, tpr, _ = roc_curve(y_test, y_prob)
 roc_auc = auc(fpr, tpr)
 
@@ -548,7 +505,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# KRZYWA PREC–REC
+# Krzywa PREC–REC
 prec, rec, thr = precision_recall_curve(y_test, y_prob)
 
 plt.figure(figsize=(5, 4))
@@ -559,14 +516,14 @@ plt.ylabel("Precyzja")
 plt.tight_layout()
 plt.show()
 
-# RÓŻNE PROGI DECYZJI
+# Różne progi decyzji
 thresholds = [0.3, 0.5, 0.7]
 for t in thresholds:
     y_thr = (y_prob >= t).astype(int)
     print(f"\nPROG = {t}")
     print(classification_report(y_test, y_thr))
 
-# WPŁYW REGULARYZACJI
+# Wpływ regularyzacji
 C_values = [0.01, 0.1, 1, 10]
 auc_list = []
 
@@ -585,41 +542,27 @@ plt.ylabel("Pole pod krzywą ROC (AUC)")
 plt.tight_layout()
 plt.show()
 
-# RAPORT KOŃCOWY
+# Raport końcowy
 print("\nRAPORT KLASYFIKACJI (domyślny próg = 0.5):")
 print(classification_report(y_test, y_pred))
 
-#======================
-#SIECI NEURONOWE (+SMOTE)
-#======================
-import pandas as pd
-import tensorflow as tf
-from tensorflow.keras import layers, models
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
-import matplotlib.pyplot as plt
-import random
-import os
+# SIEĆ NEURONOWA (+ SMOTE)
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
+os.environ['TF_DETERMINISTIC_OPS'] = '1'
 
-# --- Ustawienie powtarzalności ---
-random.seed(42)                 # Python random
-np.random.seed(42)              # NumPy random
-tf.random.set_seed(42)          # TensorFlow random
-os.environ['TF_DETERMINISTIC_OPS'] = '1'  # deterministyczne operacje TensorFlow
-
-
-# --- SMOTE – balansowanie zbioru treningowego ---
-print("\nBALANS PRZED SMOTE:")
+# SMOTE (balansowanie zbioru treningowego)
+print("\nBalans klas przed SMOTE:")
 print(y_train.value_counts())
 
 sm = SMOTE(random_state=42)
 X_train_res2, y_train_res2 = sm.fit_resample(X_train, y_train)
 
-print("BALANS KLAS PO SMOTE:")
+print("Balans klas po SMOTE:")
 print(pd.Series(y_train_res2).value_counts())
 
-# --- Tworzenie modelu Dense ---
+# Tworzenie modelu Dense
 model = models.Sequential([
     layers.Input(shape=(X_train.shape[1],)),
     layers.Dense(64, activation='relu', kernel_regularizer=tf.keras.regularizers.l2(0.001)),
@@ -630,20 +573,20 @@ model = models.Sequential([
     #layers.Dense(len(set(y)), activation='softmax'
 ])
 
-# --- Kompilacja modelu ---
+# Kompilacja modelu
 model.compile(optimizer='adam',
               loss='binary_crossentropy', #'sparse_categorical_crossentropy'
               metrics=['accuracy'])
 
-# --- Trenowanie ---
+# Trenowanie
 early_stop = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=5,restore_best_weights=True)
 history = model.fit(X_train_res2, y_train_res2, epochs=50, batch_size=32, validation_split=0.2, callbacks=[early_stop], shuffle=True)
 
-# --- Ocena ---
+# Ocena
 loss, accuracy = model.evaluate(X_test, y_test)
 print(f'Test Loss: {loss:.4f}, Test Accuracy: {accuracy:.4f}')
 
-# --- Wykresy treningu ---
+# Wykresy treningu
 plt.figure(figsize=(12,5))
 plt.subplot(1,2,1)
 plt.plot(history.history['loss'], label='Strata treningowa')
@@ -662,9 +605,9 @@ plt.ylabel('Wartość dokładności')
 plt.legend()
 plt.show()
 
-# --- Macierz pomyłek ---
-y_pred_probs = model.predict(X_test) #zwraca prawdopodobieństwo przynależności do klasy pozytywnej
-y_pred2 = (y_pred_probs > 0.5).astype(int) #próg ustawiony jako 0,5
+# Macierz pomyłek
+y_pred_probs = model.predict(X_test)
+y_pred2 = (y_pred_probs > 0.5).astype(int)
 #y_pred = y_pred_probs.argmax(axis=1)
 cm = confusion_matrix(y_test, y_pred2)
 disp = ConfusionMatrixDisplay(confusion_matrix=cm)
@@ -674,7 +617,7 @@ plt.xlabel("Klasa przewidywana")
 plt.ylabel("Klasa rzeczywista")
 plt.show()
 
-# --- Krzywa ROC + AUC ---
+# Krzywa ROC
 fpr2, tpr2, _ = roc_curve(y_test, y_pred_probs)
 roc_auc = auc(fpr2, tpr2)
 
@@ -688,7 +631,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-# --- Krzywa PRECISION–RECALL ---
+# Krzywa PREC–REC
 prec2, rec2, _ = precision_recall_curve(y_test, y_pred_probs)
 
 plt.figure(figsize=(5, 4))
@@ -699,7 +642,7 @@ plt.ylabel("Precyzja")
 plt.tight_layout()
 plt.show()
 
-# --- Różne progi decyzji ---
+# Różne progi decyzji
 thresholds = [0.3, 0.5, 0.7]
 
 for t in thresholds:
@@ -707,13 +650,11 @@ for t in thresholds:
     print(f"\n=== PRÓG DECYZYJNY = {t} ===")
     print(classification_report(y_test, y_pred_thr2))
 
-# --- Raport końcowy ---
+# Raport końcowy
 print("\nRAPORT KLASYFIKACJI (próg = 0.5):")
 print(classification_report(y_test, y_pred2))
 
-# --- stworzenie nowej sieci do sprawdzenia wpływu regularyzacji ---
-from sklearn.metrics import roc_curve, auc
-
+# Stworzenie nowej sieci do sprawdzenia wpływu regularyzacji
 l2_values = [0.0, 0.0001, 0.001, 0.01]
 auc_list = []
 
@@ -762,7 +703,7 @@ for l2_lambda in l2_values:
     fpr, tpr, _ = roc_curve(y_test, y_prob)
     auc_list.append(auc(fpr, tpr))
 
-# --- Wykres regularyzacji ---
+# Wykres regularyzacji
 plt.figure(figsize=(5, 4))
 plt.plot(l2_values, auc_list, marker='o')
 plt.xscale('log')
